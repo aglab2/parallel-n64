@@ -18,6 +18,8 @@
  *   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.          *
  * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
+#define NEW_DYNAREC_DEBUG
+
 typedef enum {
   EQ,
   NE,
@@ -1301,14 +1303,6 @@ static void output_w32(u_int word)
   out+=4;
 }
 
-static u_int genjmp(uintptr_t addr)
-{
-  if(addr<4) return 0;
-  int offset=addr-(intptr_t)out;
-  assert(offset>=-134217728&&offset<134217728);
-  return ((u_int)offset>>2)&0x3ffffff;
-}
-
 static u_int gencondjmp(uintptr_t addr)
 {
   if(addr<4) return 0;
@@ -1644,7 +1638,7 @@ static void emit_loadreg(int r, int hr)
     output_w32(0xf9400000|((offset>>3)<<10)|(FP<<5)|hr);
   }
   else {
-    intptr_t addr=((intptr_t)reg)+((r&63)<<3)+((r&64)>>4);
+    intptr_t addr=((intptr_t)mupencorereg)+((r&63)<<3)+((r&64)>>4);
     if((r&63)==HIREG) addr=(intptr_t)&hi+((r&64)>>4);
     if((r&63)==LOREG) addr=(intptr_t)&lo+((r&64)>>4);
     if(r==CCREG) addr=(intptr_t)&cycle_count;
@@ -1661,7 +1655,7 @@ static void emit_loadreg(int r, int hr)
 static void emit_storereg(int r, int hr)
 {
   assert(hr!=29);
-  intptr_t addr=((intptr_t)reg)+((r&63)<<3)+((r&64)>>4);
+  intptr_t addr=((intptr_t)mupencorereg)+((r&63)<<3)+((r&64)>>4);
   if((r&63)==HIREG) addr=(intptr_t)&hi+((r&64)>>4);
   if((r&63)==LOREG) addr=(intptr_t)&lo+((r&64)>>4);
   if(r==CCREG) addr=(intptr_t)&cycle_count;
@@ -1677,7 +1671,7 @@ static void emit_storereg64(int r, int hr)
 {
   assert(hr!=29);
   assert(r<FSREG);
-  intptr_t addr=(intptr_t)&reg[r];
+  intptr_t addr=(intptr_t)&mupencorereg[r];
   if(r==HIREG) addr=(intptr_t)&hi;
   if(r==LOREG) addr=(intptr_t)&lo;
   u_int offset = addr-(intptr_t)&dynarec_local;
@@ -2424,18 +2418,75 @@ static void emit_set_if_carry64_32(int u1, int l1, int u2, int l2, int rt)
   emit_cmovb_imm(1,rt);
 }
 
-static void emit_call(intptr_t a)
+#define emit_call(x) { printf("%s\n", #x); emit_call_impl(x); }
+
+static void emit_call_impl(intptr_t addr)
 {
-  assem_debug("bl %x (%x+%x)",a,(intptr_t)out,a-(intptr_t)out);
-  u_int offset=genjmp(a);
-  output_w32(0x94000000|offset);
+  if (addr < 4)
+  {
+    assem_debug("[!] bl 0");
+    return output_w32(0x94000000);
+  }
+  
+  assem_debug("~bl %x (%x+%x)",addr,(intptr_t)out,addr-(intptr_t)out);
+  int offset=addr-(intptr_t)out;
+  if (offset>=-134217728&&offset<134217728)
+  {
+    // good case - do a short jump
+    u_int val = ((u_int)offset>>2)&0x3ffffff;
+    output_w32(0x94000000|val);
+  }
+  else
+  {
+    // sad case generate a veneer
+    offset=((addr&(intptr_t)~0xfff)-((intptr_t)out&(intptr_t)~0xfff))>>12;
+    assert((((intptr_t)out&(intptr_t)~0xfff)+(offset<<12))==(addr&(intptr_t)~0xfff));
+    int rt = 17; // use IP1=x17
+    assem_debug("adrp %d,#%d",regname64[rt],offset);
+    output_w32(0x90000000|((u_int)offset&0x3)<<29|(((u_int)offset>>2)&0x7ffff)<<5|rt);
+    if((addr&(intptr_t)0xfff)!=0)
+    {
+      assem_debug("add %s, %s, #%d",regname64[rt],regname64[rt],addr&0xfff);
+      output_w32(0x91000000|(addr&0xfff)<<10|rt<<5|rt);
+    }
+
+    assem_debug("blr %s",regname64[rt]);
+    output_w32(0xd63f0220);
+  }
 }
 
-static void emit_jmp(intptr_t a)
+static void emit_jmp(intptr_t addr)
 {
-  assem_debug("b %x (%x+%x)",a,(intptr_t)out,a-(intptr_t)out);
-  u_int offset=genjmp(a);
-  output_w32(0x14000000|offset);
+  if (addr < 4)
+  {
+    assem_debug("[!] b 0");
+    return output_w32(0x14000000);
+  }
+
+  assem_debug("~ b %x (%x+%x)",addr,(intptr_t)out,addr-(intptr_t)out);
+  int offset=addr-(intptr_t)out;
+  if (offset>=-134217728&&offset<134217728)
+  {
+    u_int val = ((u_int)offset>>2)&0x3ffffff;
+    return output_w32(0x14000000|val);
+  }
+  else
+  {
+    // sad case generate a veneer
+    offset=((addr&(intptr_t)~0xfff)-((intptr_t)out&(intptr_t)~0xfff))>>12;
+    assert((((intptr_t)out&(intptr_t)~0xfff)+(offset<<12))==(addr&(intptr_t)~0xfff));
+    int rt = 17; // use IP1=x17
+    assem_debug("adrp %d,#%d",regname64[rt],offset);
+    output_w32(0x90000000|((u_int)offset&0x3)<<29|(((u_int)offset>>2)&0x7ffff)<<5|rt);
+    if((addr&(intptr_t)0xfff)!=0)
+    {
+      assem_debug("add %s, %s, #%d",regname64[rt],regname64[rt],addr&0xfff);
+      output_w32(0x91000000|(addr&0xfff)<<10|rt<<5|rt);
+    }
+
+    assem_debug("br %s",regname64[rt]);
+    output_w32(0xd61f0220);
+  }
 }
 
 static void emit_jne(intptr_t a)
@@ -3466,8 +3517,10 @@ static void emit_read_ptr(intptr_t addr, int rt)
     assem_debug("adrp %d,#%d",regname64[rt],offset);
     output_w32(0x90000000|((u_int)offset&0x3)<<29|(((u_int)offset>>2)&0x7ffff)<<5|rt);
     if((addr&(intptr_t)0xfff)!=0)
+    {
       assem_debug("add %s, %s, #%d",regname64[rt],regname64[rt],addr&0xfff);
       output_w32(0x91000000|(addr&0xfff)<<10|rt<<5|rt);
+    }
   }
 }
 
@@ -3882,7 +3935,7 @@ static void do_readstub(int n)
     ftable=(intptr_t)readmem;
   if(type==LOADD_STUB)
     ftable=(intptr_t)readmemd;
-  emit_writeword(rs,(intptr_t)&address);
+  emit_writeword(rs,(intptr_t)&mupencoreaddress);
   //emit_pusha();
   save_regs(reglist);
   ds=i_regs!=&regs[i];
@@ -3956,7 +4009,7 @@ static void inline_readstub(int type, int i, u_int addr, signed char regmap[], i
     ftable=(intptr_t)readmem;
   if(type==LOADD_STUB)
     ftable=(intptr_t)readmemd;
-  emit_writeword(rs,(intptr_t)&address);
+  emit_writeword(rs,(intptr_t)&mupencoreaddress);
   //emit_pusha();
   save_regs(reglist);
   if((signed int)addr>=(signed int)0xC0000000) {
@@ -4051,7 +4104,7 @@ static void do_writestub(int n)
     ftable=(intptr_t)writemem;
   if(type==STORED_STUB)
     ftable=(intptr_t)writememd;
-  emit_writeword(rs,(intptr_t)&address);
+  emit_writeword(rs,(intptr_t)&mupencoreaddress);
   //emit_shrimm(rs,16,rs);
   //emit_movmem_indexedx4(ftable,rs,rs);
   if(type==STOREB_STUB)
@@ -4118,7 +4171,7 @@ static void inline_writestub(int type, int i, u_int addr, signed char regmap[], 
     ftable=(intptr_t)writemem;
   if(type==STORED_STUB)
     ftable=(intptr_t)writememd;
-  emit_writeword(rs,(intptr_t)&address);
+  emit_writeword(rs,(intptr_t)&mupencoreaddress);
   //emit_shrimm(rs,16,rs);
   //emit_movmem_indexedx4(ftable,rs,rs);
   if(type==STOREB_STUB)
@@ -5354,7 +5407,7 @@ static void cop0_assemble(int i,struct regstat *i_regs)
       if(t>=0) {
         emit_addimm64(FP,(intptr_t)&fake_pc-(intptr_t)&dynarec_local,0);
         emit_movimm((source[i]>>11)&0x1f,1);
-        emit_writeword64(0,(intptr_t)&PC);
+        emit_writeword64(0,(intptr_t)&mupencorePC);
         emit_writebyte(1,(intptr_t)&(fake_pc.f.r.nrd));
         if(copr==9) {
           emit_readword((intptr_t)&last_count,ECX);
@@ -5377,7 +5430,7 @@ static void cop0_assemble(int i,struct regstat *i_regs)
     wb_register(rs1[i],i_regs->regmap,i_regs->dirty,i_regs->is32);
     emit_addimm64(FP,(intptr_t)&fake_pc-(intptr_t)&dynarec_local,0);
     emit_movimm((source[i]>>11)&0x1f,1);
-    emit_writeword64(0,(intptr_t)&PC);
+    emit_writeword64(0,(intptr_t)&mupencorePC);
     emit_writebyte(1,(intptr_t)&(fake_pc.f.r.nrd));
     if(copr==9||copr==11||copr==12) {
       emit_readword((intptr_t)&last_count,ECX);
@@ -5514,7 +5567,7 @@ static void cop1_assemble(int i,struct regstat *i_regs)
       signed char temp=get_reg(i_regs->regmap,-1);
       assert(temp>=0);
       emit_andimm(sl,3,temp);
-      emit_addimm64(FP,(intptr_t)&rounding_modes-(intptr_t)&dynarec_local,HOST_TEMPREG);
+      emit_addimm64(FP,(intptr_t)rounding_modes-(intptr_t)&dynarec_local,HOST_TEMPREG);
       emit_readword_dualindexedx4(HOST_TEMPREG,temp,temp);
       output_w32(0xd53b4400|HOST_TEMPREG); /*Read FPCR*/
       emit_andimm(HOST_TEMPREG,~0xc00000,HOST_TEMPREG); /*Clear RMode*/
@@ -6626,7 +6679,7 @@ static void do_preload_rhash(int r) {
 }
 
 static void do_preload_rhtbl(int ht) {
-  emit_addimm64(FP,(intptr_t)&mini_ht-(intptr_t)&dynarec_local,ht);
+  emit_addimm64(FP,(intptr_t)mini_ht-(intptr_t)&dynarec_local,ht);
 }
 
 static void do_rhash(int rs,int rh) {
@@ -6661,8 +6714,8 @@ static void do_miniht_insert(u_int return_address,int rt,int temp) {
   emit_movk(return_address&0xffff,rt);
   add_to_linker((intptr_t)out,return_address,1);
   emit_adr((intptr_t)out,temp);
-  emit_writeword64(temp,(intptr_t)&mini_ht[(return_address&0xFF)>>3][1]);
-  emit_writeword(rt,(intptr_t)&mini_ht[(return_address&0xFF)>>3][0]);
+  emit_writeword64(temp,(intptr_t)&mini_ht[2 * ((return_address&0xFF)>>3) + 1]);
+  emit_writeword(rt,(intptr_t)&mini_ht[2 * ((return_address&0xFF)>>3) + 0]);
 }
 
 // Clearing the cache is rather slow on ARM Linux, so mark the areas
@@ -6678,7 +6731,7 @@ static void do_clear_cache(void)
       for(j=0;j<32;j++) 
       {
         if(bitmap&(1<<j)) {
-          start=BASE_ADDR+i*131072+j*4096;
+          start=base_addr+i*131072+j*4096;
           end=start+4095;
           j++;
           while(j<32) {

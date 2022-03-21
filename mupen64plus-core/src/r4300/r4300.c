@@ -51,7 +51,7 @@ unsigned int r4300emu = 0;
 unsigned int count_per_op = COUNT_PER_OP_DEFAULT;
 unsigned int llbit;
 int stop;
-#if NEW_DYNAREC < NEW_DYNAREC_ARM
+#if !defined(NEW_DYNAREC) || NEW_DYNAREC < NEW_DYNAREC_ARM
 int64_t reg[32], hi, lo;
 uint32_t next_interrupt;
 struct precomp_instr *PC;
@@ -66,7 +66,7 @@ cpu_instruction_table current_instruction_table;
 void generic_jump_to(uint32_t address)
 {
    if (r4300emu == CORE_PURE_INTERPRETER)
-      PC->addr = address;
+      mupencorePC = address;
    else {
 #if NEW_DYNAREC
       if (r4300emu == CORE_DYNAREC)
@@ -129,7 +129,7 @@ void r4300_init(void)
         if (!actual->block)
             return;
 
-        last_addr = PC->addr;
+        last_addr = mupencorePC->addr;
     }
 }
 
@@ -143,16 +143,27 @@ void r4300_execute(void)
     else if (r4300emu >= 2)
     {
 #if NEW_DYNAREC
+        printf("%s:%d\n", __func__, __LINE__);
         new_dyna_start();
+        printf("%s:%d\n", __func__, __LINE__);
         if (stop)
+        {
+            printf("%s:%d\n", __func__, __LINE__);
             new_dynarec_cleanup();
+            printf("%s:%d\n", __func__, __LINE__);
+        }
 #else
         dyna_start(dynarec_setup_code);
         if (stop)
-            PC++;
+            mupencorePC++;
 #endif
+        printf("%s:%d\n", __func__, __LINE__);
         if (stop)
+        {
+            printf("%s:%d\n", __func__, __LINE__);
             free_blocks();
+        }
+        printf("%s:%d\n", __func__, __LINE__);
     }
 #endif
     else /* if (r4300emu == CORE_INTERPRETER) */
@@ -173,6 +184,6 @@ void r4300_step(void)
 {
    while (!stop && !retro_stop_stepping())
    {
-      PC->ops();
+      mupencorePC->ops();
    }
 }

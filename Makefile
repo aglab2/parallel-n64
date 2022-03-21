@@ -296,16 +296,19 @@ else ifneq (,$(findstring osx,$(platform)))
    endif
 
    ifeq ($(CROSS_COMPILE),1)
+      ifneq (,$(findstring arm,$(LIBRETRO_APPLE_PLATFORM)))
+          CFLAGS +=   -DNO_ASM -DARM -D__arm__ -DARM_ASM -DDONT_WANT_ARM_OPTIMIZATIONS -D__NEON_OPT -DARM_FIX
+          CPPFLAGS += -DNO_ASM -DARM -D__arm__ -DARM_ASM -DDONT_WANT_ARM_OPTIMIZATIONS -D__NEON_OPT -DARM_FIX
+          CXXFLAGS += -DNO_ASM -DARM -D__arm__ -DARM_ASM -DDONT_WANT_ARM_OPTIMIZATIONS -D__NEON_OPT -DARM_FIX
+          CPUFLAGS += -fno-stack-protector -fomit-frame-pointer
+          HAVE_NEON=1
+      endif
 		TARGET_RULE   = -target $(LIBRETRO_APPLE_PLATFORM)
 		CFLAGS   += $(TARGET_RULE)
 		CPPFLAGS += $(TARGET_RULE)
 		CXXFLAGS += $(TARGET_RULE)
 		LDFLAGS  += $(TARGET_RULE)
    endif
-
-	CFLAGS  += $(ARCHFLAGS)
-	CXXFLAGS  += $(ARCHFLAGS)
-	LDFLAGS += $(ARCHFLAGS)
 
 # iOS
 else ifneq (,$(findstring ios,$(platform)))
@@ -871,11 +874,11 @@ else
 ifneq (,$(findstring msvc,$(platform)))
    CPUOPTS += -O2
 else
-	CPUOPTS += -Ofast
+	CPUOPTS += -g
 endif
-   CPUOPTS += -DNDEBUG
+   # CPUOPTS += -DNDEBUG
 ifneq ($(findstring Darwin,$(UNAME)),)
-   CPUOPTS += -flto
+   # CPUOPTS += -flto
 else ifeq ($(findstring msvc,$(platform)),)
 ifneq ($(platform), emscripten)
 ifneq ($(shell $(CC) -v 2>&1 | grep -c "clang"),1)
@@ -915,12 +918,15 @@ ifeq ($(platform), qnx)
    CFLAGS   += -Wp,-MMD
    CXXFLAGS += -Wp,-MMD
 else
-ifeq ($(GLIDEN64),1)
-   CFLAGS   += -DGLIDEN64
-   CXXFLAGS += -DGLIDEN64
+ifeq ($(HAVE_GLIDEN64),1)
    WANT_CXX11=1
-   CFLAGS   += -MMD
-   CXXFLAGS += -MMD
+   ifeq (,$(findstring msvc,$(platform)))
+     CFLAGS   += -MMD
+     CXXFLAGS += -MMD
+   else
+     CFLAGS   += -MT
+     CXXFLAGS += -MT
+   endif
 else ifeq ($(HAVE_PARALLEL), 1)
    WANT_CXX11=1
    ifeq (,$(findstring msvc,$(platform)))

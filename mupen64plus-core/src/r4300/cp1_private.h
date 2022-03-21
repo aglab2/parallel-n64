@@ -26,9 +26,17 @@
 
 #include "cp1.h"
 
+#if !defined(NEW_DYNAREC) || NEW_DYNAREC < NEW_DYNAREC_ARM
 extern float *reg_cop1_simple[32];
 extern double *reg_cop1_double[32];
 extern uint32_t FCR0, FCR31;
+#else
+extern void *base_addr;
+#define reg_cop1_simple ( (float**)  (((char*)base_addr)+33555160))
+#define reg_cop1_double ((double**)  (((char*)base_addr)+33555416))
+#define FCR0            (*(uint32_t*)(((char*)base_addr)+33554752))
+#define FCR31           (*(uint32_t*)(((char*)base_addr)+33554756))
+#endif
 extern int64_t reg_cop1_fgr_64[32];
 extern uint32_t rounding_mode;
 

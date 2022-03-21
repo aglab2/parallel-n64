@@ -30,6 +30,7 @@
 #define NEW_DYNAREC_ARM 3
 #define NEW_DYNAREC_ARM64 4
 
+#if NEW_DYNAREC < NEW_DYNAREC_ARM
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -37,6 +38,11 @@ extern int pcaddr;
 extern int pending_exception;
 #ifdef __cplusplus
 }
+#endif
+#else
+extern void* base_addr;
+#define pcaddr            (*(int*)(((char*)base_addr)+33554704))
+#define pending_exception (*(int*)(((char*)base_addr)+33554700))
 #endif
 
 void invalidate_all_pages(void);

@@ -24,7 +24,12 @@
 
 #include "cp0.h"
 
+#if !defined(NEW_DYNAREC) || NEW_DYNAREC < NEW_DYNAREC_ARM
 extern uint32_t g_cp0_regs[CP0_REGS_COUNT];
+#else
+extern void* base_addr;
+#define g_cp0_regs ((uint32_t*)(((char*)base_addr)+33555032))
+#endif
 
 int check_cop1_unusable(void);
 

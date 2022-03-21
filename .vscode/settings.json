@@ -1,0 +1,17 @@
+{
+    "files.associations": {
+        "*.def": "c",
+        "__locale": "c",
+        "ios": "c",
+        "device.h": "c",
+        "r4300.h": "c",
+        "r4300_core.h": "c",
+        "si_controller.h": "c",
+        "rsp_core.h": "c",
+        "rom.h": "c",
+        "mi_controller.h": "c",
+        "m64p_types.h": "c",
+        "memory": "c",
+        "dbg_types.h": "c"
+    }
+}

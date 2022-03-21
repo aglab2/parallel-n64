@@ -6155,8 +6155,13 @@ typedef ptrdiff_t GLsizeiptr;
 
 #ifndef GL_ARB_vertex_buffer_object
 /* GL types for handling large vertex buffer objects */
+#ifdef __APPLE__
+typedef intptr_t GLintptrARB;
+typedef intptr_t GLsizeiptrARB;
+#else
 typedef ptrdiff_t GLintptrARB;
 typedef ptrdiff_t GLsizeiptrARB;
+#endif
 #endif
 
 #ifndef GL_ARB_shader_objects

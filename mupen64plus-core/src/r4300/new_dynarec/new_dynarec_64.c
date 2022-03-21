@@ -26,6 +26,8 @@
 
 #if defined(__APPLE__)
 #include <sys/types.h> // needed for u_int, u_char, etc
+#include <pthread.h>
+#include <libkern/OSCacheControl.h>
 #define MAP_ANONYMOUS MAP_ANON
 #endif
 
@@ -45,6 +47,8 @@
 #include "../recomph.h"
 #include "../tlb.h"
 #include "../fpu.h"
+
+#include "mips_dasm.h"
 
 #if !defined(WIN32)
 #ifndef HAVE_LIBNX
@@ -69,7 +73,8 @@
 //#define DEBUG_CYCLE_COUNT 1
 
 // Uncomment these two lines to generate debug output:
-//#define ASSEM_DEBUG 1
+#define NEW_DYNAREC_DEBUG
+#define ASSEM_DEBUG 1
 //#define INV_DEBUG 1
 
 // Uncomment this line to output the number of NOTCOMPILED blocks as they occur:
@@ -259,14 +264,14 @@ static void add_to_linker(intptr_t addr,u_int target,int ext);
 static int verify_dirty(void *addr);
 static int internal_branch(uint64_t i_is32, int addr);
 
-static void nullf() {}
+static void nullf(const char* fmt, ...) {}
 #if defined( ASSEM_DEBUG )
-    #define assem_debug(...) DebugMessage(M64MSG_VERBOSE, __VA_ARGS__)
+    #define assem_debug(fmt, ...) printf("%s:%d " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
 #else
     #define assem_debug nullf
 #endif
 #if defined( INV_DEBUG )
-    #define inv_debug(...) DebugMessage(M64MSG_VERBOSE, __VA_ARGS__)
+    #define inv_debug(...) DebugMessage(M64MSG_INFO, __VA_ARGS__)
 #else
     #define inv_debug nullf
 #endif
@@ -300,7 +305,7 @@ static int gpr_checksum(void)
   int i;
   int sum=0;
   for(i=0;i<64;i++)
-    sum^=((u_int *)reg)[i];
+    sum^=((u_int *)mupencorereg)[i];
   return sum;
 }
 
@@ -1293,7 +1298,7 @@ void invalidate_block(u_int block)
   }
   else if(block>=0x80000&&block<0x80800) memory_map[block]=((uintptr_t)g_dev.ri.rdram.dram-0x80000000)>>2;
   #ifdef USE_MINI_HT
-  memset(mini_ht,-1,sizeof(mini_ht));
+  memset(mini_ht,-1,sizeof(_mini_ht));
   #endif
 }
 
@@ -1344,7 +1349,7 @@ void invalidate_all_pages(void)
   //cacheflush((void *)base_addr,(void *)base_addr+(1<<TARGET_SIZE_2),0);
   #endif
   #ifdef USE_MINI_HT
-  memset(mini_ht,-1,sizeof(mini_ht));
+  memset(mini_ht,-1,sizeof(_mini_ht));
   #endif
   // TLB
   for(page=0;page<0x100000;page++) {
@@ -7657,6 +7662,8 @@ static void clean_registers(int istart,int iend,int wr)
   }
 }
 
+#include <sys/errno.h>
+
 #ifdef NEW_DYNAREC_DEBUG
   /* disassembly */
 static void disassemble_inst(int i)
@@ -7739,22 +7746,29 @@ static void disassemble_inst(int i)
 }
 #endif
 
-void new_dynarec_init(void)
+void new_dynarec_create_mapping(void)
 {
-#ifdef NEW_DYNAREC_DEBUG
-  pDebugFile = fopen("new_dynarec_debug.txt","w");
-  pDisasmFile = fopen("new_dynarec_disasm.txt","w");
-#endif
-#if defined(NEW_DYNAREC_PROFILER) && !defined(PROFILER)
-  profiler_init(); 
-#endif
 #ifndef PROFILER
   DebugMessage(M64MSG_INFO, "Init new dynarec");
 #if NEW_DYNAREC >= NEW_DYNAREC_ARM
-  if ((base_addr = mmap ((u_char *)BASE_ADDR, 1<<TARGET_SIZE_2,
+  // This is a stupid hack - we want part of mapping to be RWX and other part of map to be RW
+  // We hope that the 2nd map wont fail but really this should just do it couple hundred times
+  if ((base_addr = mmap (NULL, 1<<TARGET_SIZE_2,
             PROT_READ | PROT_WRITE | PROT_EXEC,
-            MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS,
-            -1, 0)) <= 0) {DebugMessage(M64MSG_ERROR, "mmap() failed");}
+            MAP_ANON | MAP_PRIVATE | MAP_JIT,
+            -1, 0)) == MAP_FAILED) {DebugMessage(M64MSG_ERROR, "first mmap() failed: %d[%s] | %p | %d", errno, strerror(errno), base_addr, 1<<TARGET_SIZE_2);}
+
+  // prayge
+  if (mmap ((char*) base_addr + (1<<TARGET_SIZE_2), 1<<TARGET_SIZE_2,
+            PROT_READ | PROT_WRITE,
+            MAP_FIXED | MAP_ANON | MAP_PRIVATE,
+            -1, 0) == MAP_FAILED) {DebugMessage(M64MSG_ERROR, "second mmap() failed: %d[%s] | %p | %d", errno, strerror(errno), base_addr, 1<<TARGET_SIZE_2);}
+
+  DebugMessage(M64MSG_INFO, "mmap -> %p | 0x%x", base_addr, 1<<(TARGET_SIZE_2 + 1));
+  for (int i = 1<<TARGET_SIZE_2; i < 1<<(TARGET_SIZE_2 + 1); i++)
+  {
+    ((char*) base_addr)[i] = 0xff;
+  }
 #else
 #if defined(WIN32)
   base_addr = VirtualAlloc(NULL, 1<<TARGET_SIZE_2, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
@@ -7765,6 +7779,17 @@ void new_dynarec_init(void)
             -1, 0)) <= 0) {DebugMessage(M64MSG_ERROR, "mmap() failed");}
 #endif
 #endif
+#endif
+}
+
+void new_dynarec_init(void)
+{
+#ifdef NEW_DYNAREC_DEBUG
+  pDebugFile = fopen("new_dynarec_debug.txt","w");
+  pDisasmFile = fopen("new_dynarec_disasm.txt","w");
+#endif
+#if defined(NEW_DYNAREC_PROFILER) && !defined(PROFILER)
+  profiler_init(); 
 #endif
   out=(u_char *)base_addr;
 
@@ -7777,8 +7802,8 @@ void new_dynarec_init(void)
     invalid_code[n]=1;
   for(n=0;n<65536;n++)
     hash_table[n][0]=hash_table[n][2]=-1;
-  memset(mini_ht,-1,sizeof(mini_ht));
-  memset(restore_candidate,0,sizeof(restore_candidate));
+  memset(mini_ht,-1,sizeof(_mini_ht));
+  memset(restore_candidate,0,sizeof(_restore_candidate));
   copy=shadow;
   expirep=16384; // Expiry pointer, +2 blocks
   pending_exception=0;
@@ -7840,6 +7865,9 @@ void new_dynarec_cleanup(void)
   VirtualFree(base_addr, 0, MEM_RELEASE);
 #else
   if (munmap (base_addr, 1<<TARGET_SIZE_2) < 0) {DebugMessage(M64MSG_ERROR, "munmap() failed");}
+#if NEW_DYNAREC >= NEW_DYNAREC_ARM
+  if (munmap (base_addr + (1<<TARGET_SIZE_2), 1<<TARGET_SIZE_2) < 0) {DebugMessage(M64MSG_ERROR, "munmap() failed");}
+#endif
 #endif
   for(n=0;n<4096;n++) ll_clear(jump_in+n);
   for(n=0;n<4096;n++) ll_clear(jump_out+n);
@@ -7849,7 +7877,21 @@ void new_dynarec_cleanup(void)
   #endif
 }
 
+static int new_recompile_block_impl(int addr);
 int new_recompile_block(int addr)
+{
+  printf("JIT protect disabled [%p]\n", addr);
+  pthread_jit_write_protect_np(0);
+  int r=new_recompile_block_impl(addr);
+  pthread_jit_write_protect_np(1);
+  printf("JIT protect enabled\n");
+  // TODO: this is overkill
+  sys_icache_invalidate(base_addr, 1<<TARGET_SIZE_2);
+
+  return r;
+}
+
+static int new_recompile_block_impl(int addr)
 {
 #if defined(NEW_DYNAREC_PROFILER) && !defined(PROFILER)
   copy_mapping(&memory_map);

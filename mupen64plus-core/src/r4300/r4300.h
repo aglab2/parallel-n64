@@ -28,15 +28,26 @@
 #include "r4300_core.h"
 #include "recomp.h"
 
+#if !defined(NEW_DYNAREC) || NEW_DYNAREC < NEW_DYNAREC_ARM
 extern struct precomp_instr *PC;
+extern int64_t reg[32], hi, lo;
+extern uint32_t next_interrupt;
+#define mupencorePC PC
+#define mupencorereg reg
+#else
+extern void* base_addr;
+#define mupencorePC    (*(struct precomp_instr**)(((char*)base_addr)+33555696))
+#define mupencorereg   ( (int64_t*)              (((char*)base_addr)+33554760))
+#define hi             (*(int64_t*)              (((char*)base_addr)+33555016))
+#define next_interrupt (*(uint32_t*)             (((char*)base_addr)+33554688))
+#define lo             (*(int64_t*)              (((char*)base_addr)+33555024))
+#endif
 extern int stop;
 extern unsigned int llbit;
-extern int64_t reg[32], hi, lo;
 extern long long int local_rs;
 extern uint32_t skip_jump;
 extern unsigned int dyna_interp;
 extern unsigned int r4300emu;
-extern uint32_t next_interrupt;
 extern uint32_t last_addr;
 #define COUNT_PER_OP_DEFAULT 2
 extern unsigned int count_per_op;

@@ -127,18 +127,34 @@ void write_rdramh_new(void);
 void write_rdramd_new(void);
 void breakpoint(void);
 
-extern char *invc_ptr;
-extern char extra_memory[33554432];
-extern int cycle_count;
-extern int last_count;
-extern int branch_target;
-extern uint64_t ram_offset;
-extern uint64_t readmem_dword;
-extern struct precomp_instr fake_pc;
-extern void *dynarec_local;
-extern uint64_t memory_map[1048576];
-extern uint64_t mini_ht[32][2];
-extern u_int rounding_modes[4];
-extern u_char restore_candidate[512];
+extern void *base_addr;
+
+// extern char *invc_ptr;
+#define invc_ptr          (*(char**)               (((char*)base_addr)+33554712))
+// extern int cycle_count;
+#define cycle_count       (*(int*)                 (((char*)base_addr)+33554692))
+// extern int last_count;
+#define last_count        (*(int*)                 (((char*)base_addr)+33554696))
+// extern int branch_target;
+#define branch_target     (*(int*)                 (((char*)base_addr)+33555688))
+// extern uint64_t ram_offset;
+#define ram_offset        (*(uint64_t*)            (((char*)base_addr)+33555912))
+// extern uint64_t readmem_dword;
+#define readmem_dword     (*(uint64_t*)            (((char*)base_addr)+33554728))
+// extern struct precomp_instr fake_pc;
+#define fake_pc           (*(struct precomp_instr*)(((char*)base_addr)+33555704))
+// extern void *dynarec_local;
+#define dynarec_local     (*(void**)               (((char*)base_addr)+33554432))
+// extern uint64_t memory_map[1048576];
+#define memory_map        ( (uint64_t*)            (((char*)base_addr)+33556960))
+// extern uint64_t mini_ht[32][2];
+extern uint64_t _mini_ht[32][2];
+#define mini_ht           ( (uint64_t*)            (((char*)base_addr)+33555920))
+// extern u_int rounding_modes[4];
+extern u_int _rounding_modes[4];
+#define rounding_modes    ( (u_int*)               (((char*)base_addr)+33555672))
+// extern u_char restore_candidate[512];
+extern u_char _restore_candidate[512];
+#define restore_candidate ( (u_char*)              (((char*)base_addr)+33556432))
 
 #endif /* M64P_R4300_ASSEM_ARM64_H */
